@@ -9,23 +9,29 @@ set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release" "RelWithD
 
 project(LoulouteBot)
 
-set(DPP_FILE "libdpp.so")
+if (WIN32)
+    set(DPP_OUT_DIR "library/${CMAKE_BUILD_TYPE}")
+    set(DPP_FILE "dpp.dll")
+else()
+    set(DPP_OUT_DIR "library")
+    set(DPP_FILE "libdpp.so")
+endif()
 
 add_library(LIBDPP INTERFACE)
 add_dependencies(LIBDPP build_libdpp)
 target_link_libraries(LIBDPP INTERFACE dpp)
-target_link_directories(LIBDPP INTERFACE "${CMAKE_CURRENT_BINARY_DIR}/build_DPP_${CMAKE_BUILD_TYPE}/library")
+target_link_directories(LIBDPP INTERFACE "${CMAKE_CURRENT_BINARY_DIR}/build_DPP_${CMAKE_BUILD_TYPE}/${DPP_OUT_DIR}")
 target_include_directories(LIBDPP INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/DPP/include")
 
 
-add_custom_target(build_libdpp DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/build_DPP_${CMAKE_BUILD_TYPE}/library/${DPP_FILE}")
-add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/build_DPP_${CMAKE_BUILD_TYPE}/library/${DPP_FILE}"
-                   COMMAND $(MAKE)
+add_custom_target(build_libdpp DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/build_DPP_${CMAKE_BUILD_TYPE}/${DPP_OUT_DIR}/${DPP_FILE}")
+add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/build_DPP_${CMAKE_BUILD_TYPE}/${DPP_OUT_DIR}/${DPP_FILE}"
+                   COMMAND ${CMAKE_COMMAND} --build "${CMAKE_CURRENT_BINARY_DIR}/build_DPP_${CMAKE_BUILD_TYPE}" --config "${CMAKE_BUILD_TYPE}"
                    WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/build_DPP_${CMAKE_BUILD_TYPE}/"
-                   DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/build_DPP_${CMAKE_BUILD_TYPE}/Makefile")
+                   DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/build_DPP_${CMAKE_BUILD_TYPE}/cmake_install.cmake")
 
-add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/build_DPP_${CMAKE_BUILD_TYPE}/Makefile"
-                   COMMAND ${CMAKE_COMMAND} -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE} "${CMAKE_CURRENT_SOURCE_DIR}/DPP"
+add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/build_DPP_${CMAKE_BUILD_TYPE}/cmake_install.cmake"
+                   COMMAND ${CMAKE_COMMAND} -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE} "${CMAKE_CURRENT_SOURCE_DIR}/DPP"
                    WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/build_DPP_${CMAKE_BUILD_TYPE}/"
                    DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/build_DPP_${CMAKE_BUILD_TYPE}/.glue")
 

@@ -83,10 +83,11 @@ static void global_setup(dpp::cluster &, const dpp::slashcommand_t &event);
 static void global_test(dpp::cluster &, const dpp::slashcommand_t &event);
 static std::unordered_map<std::string, GlobalCommand> g_global_commands{
     {"help", {"Au secours!", &global_help}},
-    {"test",
+    {"test_action",
      {"Test une action",
       &global_test,
-      {{dpp::co_string, "action", "l'action a tester", true}}}},
+      {{dpp::co_string, "action", "l'action a tester", true},
+       {dpp::co_string, "param", "paramètre de l'action", true}}}},
     {"setup", {"Configuration (Admin)", &global_setup}},
 };
 
@@ -98,17 +99,9 @@ static void global_help(dpp::cluster &, const dpp::slashcommand_t &event) {
 Voici la liste des commandes disponibles:)string";
   for (auto &i : g_global_commands) {
     oss << "\n- /" << i.first << ": " << i.second.help;
+    for (auto &j : i.second.options)
+        oss << "\n - /" << j.name << ": " << j.description;
   }
-  event.reply(oss.str());
-}
-
-static void global_test(dpp::cluster &, const dpp::slashcommand_t &event) {
-  auto v = event.get_parameter("action");
-  auto u = event.command.get_issuing_user();
-  LogInformational{} << "Action " << std::get<std::string>(v)
-                     << " a tester par " << u.username;
-  std::ostringstream oss;
-  oss << "C'est dl'a balle, n'est ce pas @" << u.username;
   event.reply(oss.str());
 }
 
@@ -173,6 +166,32 @@ static void register_bot(dpp::cluster &bot) {
       }
     }
   });
+}
+
+static void global_test(dpp::cluster &bot, const dpp::slashcommand_t& event) {
+    auto action = event.get_parameter("action");
+    auto param = event.get_parameter("param");
+    auto action_str = std::get_if<std::string>(&action);
+    auto param_str = std::get_if<std::string>(&param);
+
+    if (!action_str || !param_str)
+        return event.reply("Même pas en rêve !");
+
+    auto u = event.command.get_issuing_user();
+    
+    if (*action_str == "goodbye")
+    {
+        auto ev = dpp::guild_member_remove_t();
+        ev.guild_id = event.command.guild_id;
+        ev.removed.username = *param_str;
+        send_goodbye(bot, ev);
+    }
+    else
+    {
+        return event.reply("Action inconnu");
+    }
+
+    event.reply("Effectué");
 }
 
 int main(int argc, char *const argv[]) {

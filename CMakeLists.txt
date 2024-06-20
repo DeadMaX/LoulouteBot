@@ -28,9 +28,10 @@ add_custom_target(build_libdpp DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/build_DPP_${
 add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/build_DPP_${CMAKE_BUILD_TYPE}/${DPP_OUT_DIR}/${DPP_FILE}"
                    COMMAND ${CMAKE_COMMAND} --build "${CMAKE_CURRENT_BINARY_DIR}/build_DPP_${CMAKE_BUILD_TYPE}" --config "${CMAKE_BUILD_TYPE}"
                    WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/build_DPP_${CMAKE_BUILD_TYPE}/"
-                   DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/build_DPP_${CMAKE_BUILD_TYPE}/cmake_install.cmake")
+                   DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/build_DPP_${CMAKE_BUILD_TYPE}/CMakeCache.txt")
 
-add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/build_DPP_${CMAKE_BUILD_TYPE}/cmake_install.cmake"
+add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/build_DPP_${CMAKE_BUILD_TYPE}/CMakeCache.txt"
+		   COMMAND ${CMAKE_COMMAND} -E touch "${CMAKE_CURRENT_BINARY_DIR}/build_DPP_${CMAKE_BUILD_TYPE}/CMakeCache.txt"
                    COMMAND ${CMAKE_COMMAND} -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE} "${CMAKE_CURRENT_SOURCE_DIR}/DPP"
                    WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/build_DPP_${CMAKE_BUILD_TYPE}/"
                    DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/build_DPP_${CMAKE_BUILD_TYPE}/.glue")

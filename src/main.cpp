@@ -42,7 +42,7 @@ public:
           for (auto &i : channels) {
             if (i.second.get_type() == dpp::CHANNEL_TEXT) {
               auto &new_guild_config = guilds_config[guild_id.str()];
-              new_guild_config.set("goodby_channel", i.first.str());
+              new_guild_config.set("goodbye_channel", i.first.str());
               Configuration::to_file(guilds_config, g_config_file);
               return callback(guild_id, i.first);
             }
@@ -53,6 +53,15 @@ public:
   void clear_guild_goodbye_channel(dpp::snowflake guild_id) {
     guilds_config.set(guild_id.str(), "goodbye_channel", "0");
   }
+};
+
+template <typename T, typename U> struct default_second {
+  std::pair<T, U> value;
+  operator std::pair<T, U> &() { return value; }
+  operator const std::pair<T, U> &() const { return value; }
+
+  default_second(const T &left) : value{left, U{}} {}
+  default_second(const T &left, const U &right) : value{left, right} {}
 };
 
 struct GlobalCommand {
@@ -67,15 +76,30 @@ struct GlobalCommand {
   }
 
   template <size_t N>
-  GlobalCommand(const char (&str)[N],
-                void (*h)(dpp::cluster &, const dpp::slashcommand_t &))
-      : help{str, N - 1}, handle{h} {}
-
-  template <size_t N>
-  GlobalCommand(const char (&str)[N],
-                void (*h)(dpp::cluster &, const dpp::slashcommand_t &),
-                std::initializer_list<dpp::command_option> l)
-      : help{str, N - 1}, handle{h}, options{l} {}
+  GlobalCommand(
+      const char (&str)[N],
+      void (*h)(dpp::cluster &, const dpp::slashcommand_t &),
+      std::initializer_list<
+          default_second<dpp::command_option,
+                         std::initializer_list<dpp::command_option_choice>>>
+          l = {})
+      : help{str, N - 1}, handle{h} {
+    options.reserve(l.size());
+    std::ranges::transform(
+        l, std::back_inserter(options),
+        [](const default_second<
+            dpp::command_option,
+            std::initializer_list<dpp::command_option_choice>> &p)
+            -> dpp::command_option {
+          auto res{p.value.first};
+          res.choices.reserve(p.value.second.size());
+          std::ranges::transform(
+              p.value.second, std::back_inserter(res.choices),
+              [](const dpp::command_option_choice &c)
+                  -> dpp::command_option_choice { return c; });
+          return res;
+        });
+  }
 };
 
 static void global_help(dpp::cluster &, const dpp::slashcommand_t &event);
@@ -83,12 +107,17 @@ static void global_setup(dpp::cluster &, const dpp::slashcommand_t &event);
 static void global_test(dpp::cluster &, const dpp::slashcommand_t &event);
 static std::unordered_map<std::string, GlobalCommand> g_global_commands{
     {"help", {"Au secours!", &global_help}},
-    {"test_action",
+    {"test",
      {"Test une action",
       &global_test,
-      {{dpp::co_string, "action", "l'action a tester", true},
-       {dpp::co_string, "param", "paramètre de l'action", true}}}},
-    {"setup", {"Configuration (Admin)", &global_setup}},
+      {{{dpp::co_string, "action", "l'action a tester", true},
+        {{"Envoyer goodbye", "goodbye"}}},
+       {{dpp::co_string, "param", "paramètre de l'action", true}}}}},
+    {"setup",
+     {"Configuration (Admin)",
+      &global_setup,
+      {{{dpp::co_string, "param", "Paramètre a modifier", true}, {}},
+       {{dpp::co_string, "value", "Valeur a définir", true}}}}},
 };
 
 static GuildConfig g_guild_configs;
@@ -100,7 +129,7 @@ Voici la liste des commandes disponibles:)string";
   for (auto &i : g_global_commands) {
     oss << "\n- /" << i.first << ": " << i.second.help;
     for (auto &j : i.second.options)
-        oss << "\n - /" << j.name << ": " << j.description;
+      oss << "\n - /" << j.name << ": " << j.description;
   }
   event.reply(oss.str());
 }
@@ -141,7 +170,54 @@ static void register_bot(dpp::cluster &bot) {
       LogInformational{} << "Global command " << i.second.name << " is set";
       bool is_ok{false};
       for (auto &j : g_global_commands) {
-        if (i.second.name == j.first) {
+        if (i.second.name != j.first)
+          continue;
+
+        if (j.second.options.size() != i.second.options.size())
+          break;
+
+        std::vector<bool> option_found;
+        option_found.resize(j.second.options.size(), false);
+
+        for (size_t idx = 0; auto &k : i.second.options) {
+          bool option_ok{false};
+          for (auto &l : j.second.options) {
+            if (k.name != l.name)
+              continue;
+
+            if (k.choices.size() != l.choices.size())
+              break;
+
+            std::vector<bool> choice_found;
+            choice_found.resize(l.choices.size(), false);
+            for (size_t choise_idx = 0; auto &m : l.choices) {
+              bool choice_ok{false};
+              for (auto &n : k.choices) {
+                if (m.name != n.name)
+                  continue;
+
+                choice_ok = true;
+                break;
+              }
+
+              if (!choice_ok)
+                break;
+
+              choice_found[choise_idx] = true;
+              ++choise_idx;
+            }
+
+            if (std::ranges::find(choice_found, false) == end(choice_found))
+              option_ok = true;
+            break;
+          }
+          if (!option_ok) {
+            break;
+          }
+          option_found[idx] = true;
+          ++idx;
+        }
+        if (std::ranges::find(option_found, false) == end(option_found)) {
           j.second.registered = true;
           is_ok = true;
           LogInformational{} << "Keep";
@@ -168,30 +244,28 @@ static void register_bot(dpp::cluster &bot) {
   });
 }
 
-static void global_test(dpp::cluster &bot, const dpp::slashcommand_t& event) {
-    auto action = event.get_parameter("action");
-    auto param = event.get_parameter("param");
-    auto action_str = std::get_if<std::string>(&action);
-    auto param_str = std::get_if<std::string>(&param);
+static void global_test(dpp::cluster &bot, const dpp::slashcommand_t &event) {
+  auto action = event.get_parameter("action");
+  auto param = event.get_parameter("param");
+  auto action_str = std::get_if<std::string>(&action);
+  auto param_str = std::get_if<std::string>(&param);
 
-    if (!action_str || !param_str)
-        return event.reply("Même pas en rêve !");
+  if (!action_str || !param_str)
+    return event.reply("Même pas en rêve !");
 
-    auto u = event.command.get_issuing_user();
-    
-    if (*action_str == "goodbye")
-    {
-        auto ev = dpp::guild_member_remove_t();
-        ev.guild_id = event.command.guild_id;
-        ev.removed.username = *param_str;
-        send_goodbye(bot, ev);
-    }
-    else
-    {
-        return event.reply("Action inconnu");
-    }
+  auto u = event.command.get_issuing_user();
 
-    event.reply("Effectué");
+  if (*action_str == "goodbye") {
+    auto ev = dpp::guild_member_remove_t();
+    ev.guild_id = event.command.guild_id;
+    ev.removed.username = *param_str;
+    send_goodbye(bot, ev);
+  } else {
+    LogError{} << "Action " << *action_str << " inconnue";
+    return event.reply("Action inconnu");
+  }
+
+  event.reply("Effectué");
 }
 
 int main(int argc, char *const argv[]) {

@@ -67,8 +67,9 @@ template <typename T, typename U> struct default_second {
 struct GlobalCommand {
   std::string_view help;
   void (*handle)(dpp::cluster &, const dpp::slashcommand_t &);
-  std::vector<dpp::command_option> options;
 
+  std::vector<dpp::command_option> options;
+  dpp::permission permissions;
   bool registered{false};
 
   void operator()(dpp::cluster &b, const dpp::slashcommand_t &e) {
@@ -82,8 +83,9 @@ struct GlobalCommand {
       std::initializer_list<
           default_second<dpp::command_option,
                          std::initializer_list<dpp::command_option_choice>>>
-          l = {})
-      : help{str, N - 1}, handle{h} {
+          l = {},
+      dpp::permission p = dpp::p_use_application_commands)
+      : help{str, N - 1}, handle{h}, permissions{p} {
     options.reserve(l.size());
     std::ranges::transform(
         l, std::back_inserter(options),
@@ -112,12 +114,14 @@ static std::unordered_map<std::string, GlobalCommand> g_global_commands{
       &global_test,
       {{{dpp::co_string, "action", "l'action a tester", true},
         {{"Envoyer goodbye", "goodbye"}}},
-       {{dpp::co_string, "param", "paramètre de l'action", true}}}}},
+       {{dpp::co_string, "param", "paramètre de l'action", true}}},
+      0}},
     {"setup",
      {"Configuration (Admin)",
       &global_setup,
       {{{dpp::co_string, "param", "Paramètre a modifier", true}, {}},
-       {{dpp::co_string, "value", "Valeur a définir", true}}}}},
+       {{dpp::co_string, "value", "Valeur a définir", true}}},
+      0}},
 };
 
 static GuildConfig g_guild_configs;
@@ -172,6 +176,9 @@ static void register_bot(dpp::cluster &bot) {
       for (auto &j : g_global_commands) {
         if (i.second.name != j.first)
           continue;
+
+        if (j.second.permissions != i.second.default_member_permissions)
+          break;
 
         if (j.second.options.size() != i.second.options.size())
           break;
@@ -235,6 +242,7 @@ static void register_bot(dpp::cluster &bot) {
         LogInformational{} << "Create Global command " << i.first;
         auto c = dpp::slashcommand{
             i.first, {i.second.help.begin(), i.second.help.end()}, bot.me.id};
+        c.set_default_permissions(i.second.permissions);
         for (const auto &j : i.second.options) {
           c.add_option(j);
         }

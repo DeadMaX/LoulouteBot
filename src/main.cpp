@@ -52,6 +52,50 @@ public:
 
   void clear_guild_goodbye_channel(dpp::snowflake guild_id) {
     guilds_config.set(guild_id.str(), "goodbye_channel", "0");
+    Configuration::to_file(guilds_config, g_config_file);
+  }
+
+  void set_guild_charte_message(dpp::snowflake guild_id, dpp::snowflake channel,
+                                dpp::snowflake message) {
+    auto &c = guilds_config[guild_id.str()];
+    c.set("charte_channel", channel.str());
+    c.set("charte_message", message.str());
+
+    Configuration::to_file(guilds_config, g_config_file);
+  }
+
+  void set_guild_charte_reaction_valider(dpp::snowflake guild_id,
+                                         const std::string &reaction) {
+    auto &c = guilds_config[guild_id.str()];
+    c.set("charte_reaction_valider", reaction);
+
+    Configuration::to_file(guilds_config, g_config_file);
+  }
+
+  void set_guild_charte_role(dpp::snowflake guild_id, const std::string &role) {
+    auto &c = guilds_config[guild_id.str()];
+    c.set("charte_role", role);
+
+    Configuration::to_file(guilds_config, g_config_file);
+  }
+
+  std::string get_guild_charte_role(dpp::snowflake guild_id) const {
+    auto &c = guilds_config[guild_id.str()];
+    return c.get<std::string>("charte_role", "");
+  }
+
+  std::string get_guild_charte_reaction_valider(dpp::snowflake guild_id) const {
+    auto &c = guilds_config[guild_id.str()];
+    return c.get<std::string>("charte_reaction_valider");
+  }
+
+  std::pair<std::string, std::string>
+  get_guild_charte_message(dpp::snowflake guild_id) const {
+    std::pair<std::string, std::string> res;
+    auto &c = guilds_config[guild_id.str()];
+    res.first = c.get<std::string>("charte_channel");
+    res.second = c.get<std::string>("charte_message");
+    return res;
   }
 };
 
@@ -121,7 +165,7 @@ static std::unordered_map<std::string, GlobalCommand> g_global_commands{
       &global_setup,
       {{{dpp::co_string, "param", "Paramètre a modifier", true}, {}},
        {{dpp::co_string, "value", "Valeur a définir", true}}},
-      0}},
+      dpp::p_administrator}},
 };
 
 static GuildConfig g_guild_configs;
@@ -138,8 +182,124 @@ Voici la liste des commandes disponibles:)string";
   event.reply(oss.str());
 }
 
-static void global_setup(dpp::cluster &, const dpp::slashcommand_t &event) {
-  event.reply("Pas encore prêt");
+static void global_setup(dpp::cluster &bot, const dpp::slashcommand_t &event) {
+  auto value = event.get_parameter("value");
+  auto param = event.get_parameter("param");
+  auto value_str = std::get_if<std::string>(&value);
+  auto param_str = std::get_if<std::string>(&param);
+
+  if (!value_str || !param_str)
+    return event.reply("Même pas en rêve !");
+
+  if (*param_str == "charte_role") {
+
+    if (value_str->empty())
+      return event.reply("Pas de role donné !");
+
+    return event.thinking(true, [&bot, event, name = *value_str](
+                                    const dpp::confirmation_callback_t &ccb) {
+      if (ccb.is_error()) {
+        return event.edit_original_response(dpp::message("Erreur"));
+      }
+
+      bot.roles_get(
+          event.command.guild_id,
+          [event, name](const dpp::confirmation_callback_t &callback) {
+            if (callback.is_error()) {
+              event.edit_original_response(dpp::message("Role non trouvé"));
+              LogError{} << "role non trouvé: " << callback.get_error().message;
+              return;
+            }
+
+            const auto &m = callback.get<dpp::role_map>();
+
+            auto r = std::ranges::find_if(
+                m, [&name](const auto &r) { return r.second.name == name; });
+
+            if (r == end(m)) {
+              event.edit_original_response(dpp::message("Role non trouvé"));
+              LogError{} << "role non trouvé: " << callback.get_error().message;
+              return;
+            }
+
+            g_guild_configs.set_guild_charte_role(event.command.guild_id,
+                                                  r->first.str());
+            return event.edit_original_response(dpp::message("Okay"));
+          });
+    });
+
+  } else if (*param_str == "charte_reaction_valider") {
+
+    if (value_str->empty())
+      return event.reply("Pas de réaction donné !");
+
+    g_guild_configs.set_guild_charte_reaction_valider(event.command.guild_id,
+                                                      *value_str);
+
+    return event.reply("Okay");
+  } else if (*param_str == "charte_message") {
+
+    auto split{*value_str | std::views::split('/') |
+               std::views::transform([](auto r) {
+                 return std::string_view{r.data(), r.size()};
+               })};
+    auto v = std::vector<std::string_view>{split.begin(), split.end()};
+
+    if (v.size() < 3) {
+      return event.reply("Pas une url");
+    }
+
+    if (event.command.guild_id.str() != v[v.size() - 3]) {
+      return event.reply("Pas pour ce serveur");
+    }
+
+    return event.thinking(true, [&bot, event,
+                                 chan = std::string{v[v.size() - 2]},
+                                 mess = std::string{v[v.size() - 1]}](
+                                    const dpp::confirmation_callback_t &ccb) {
+      if (ccb.is_error()) {
+        return event.edit_original_response(dpp::message("Erreur"));
+      }
+
+      bot.message_get(
+          mess, chan,
+          [event, mess, chan](const dpp::confirmation_callback_t &callback) {
+            if (callback.is_error()) {
+              event.edit_original_response(dpp::message("message non trouvé"));
+              LogError{} << "message non trouvé: "
+                         << callback.get_error().message;
+              return;
+            }
+
+            const auto &m = callback.get<dpp::message>();
+
+            if (m.reactions.empty()) {
+              return event.edit_original_response(
+                  dpp::message("Pas de réaction trouvé"));
+            }
+
+            auto reaction_valider =
+                g_guild_configs.get_guild_charte_reaction_valider(
+                    event.command.guild_id);
+
+            if (std::ranges::find_if(
+                    m.reactions, [&reaction_valider](const dpp::reaction &r) {
+                      return r.emoji_name == reaction_valider;
+                    }) == end(m.reactions)) {
+              return event.edit_original_response(
+                  dpp::message("Réaction de validation non trouvé"));
+            }
+
+            g_guild_configs.set_guild_charte_message(event.command.guild_id,
+                                                     chan, mess);
+            event.edit_original_response(dpp::message("Effectué"));
+          });
+    });
+
+  } else {
+    return event.reply("paramètre inconnu");
+  }
+  event.reply("Effectué");
 }
 
 static void send_goodbye(dpp::cluster &bot,
@@ -332,6 +492,38 @@ int main(int argc, char *const argv[]) {
     if (dpp::run_once<struct register_bot_commands>()) {
       register_bot(bot);
     }
+  });
+
+  bot.on_message_reaction_add([&bot](const dpp::message_reaction_add_t &event) {
+    if (!event.reacting_guild) {
+      LogError{} << "Pas de guild";
+      return;
+    }
+    auto [chan, mess] =
+        g_guild_configs.get_guild_charte_message(event.reacting_guild->id);
+    if (chan != event.channel_id.str() || mess != event.message_id.str()) {
+      LogError{} << "Pas le bon message";
+      return;
+    }
+
+    auto emoji = g_guild_configs.get_guild_charte_reaction_valider(
+        event.reacting_guild->id);
+    if (emoji != event.reacting_emoji.name) {
+      LogError{} << "Pas le bon emoji: " << emoji << " <=> "
+                 << event.reacting_emoji.name;
+      return;
+    }
+
+    auto r = g_guild_configs.get_guild_charte_role(event.reacting_guild->id);
+
+    bot.guild_member_add_role(
+        event.reacting_guild->id, event.reacting_user.id, r,
+        [event](const dpp::confirmation_callback_t &ccb) {
+          if (ccb.is_error()) {
+            return dpp::utility::log_error()(ccb);
+          }
+          LogError{} << "User accepté: " << event.reacting_user.username;
+        });
   });
 
   bot.start(dpp::st_wait);

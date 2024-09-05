@@ -49,6 +49,11 @@ public:
           }
         });
   }
+  
+  void set_guild_goodbye_channel(dpp::snowflake guild_id, dpp::snowflake channel_id) {
+        guilds_config.set(guild_id.str(), "goodbye_channel", channel_id.str());
+    Configuration::to_file(guilds_config, g_config_file);
+  }
 
   void clear_guild_goodbye_channel(dpp::snowflake guild_id) {
     guilds_config.set(guild_id.str(), "goodbye_channel", "0");
@@ -97,6 +102,17 @@ public:
     res.second = c.get<std::string>("charte_message");
     return res;
   }
+
+  std::string get_guild_goodbye_message(dpp::snowflake guild_id) const {
+    auto &c = guilds_config[guild_id.str()];
+    return c.get<std::string>("goodbye_message", "%% a quitté le serveur");
+  };
+
+  void set_guild_goodbye_message(dpp::snowflake guild_id,
+                                 const std::string &s) {
+    guilds_config.set<std::string>(guild_id.str(), "goodbye_message", s);
+    Configuration::to_file(guilds_config, g_config_file);
+  };
 };
 
 template <typename T, typename U> struct default_second {
@@ -296,10 +312,46 @@ static void global_setup(dpp::cluster &bot, const dpp::slashcommand_t &event) {
           });
     });
 
+  } else if (*param_str == "goodbye_channel") {
+    if (value_str->empty())
+      return event.reply("Pas de channel donné !");
+    return event.thinking(true, [&bot, event, channel = *value_str](
+                                    const dpp::confirmation_callback_t &ccb) {
+      if (ccb.is_error()) {
+        return event.edit_original_response(dpp::message("Erreur"));
+      }
+      bot.channels_get(event.command.guild_id,[&bot, event, channel](
+                      const dpp::confirmation_callback_t &ccb2) {
+          if (ccb2.is_error()) {
+            return event.edit_original_response(dpp::message("Erreur"));
+          }
+          const auto &channels = ccb2.get<dpp::channel_map>();
+          for (auto &i : channels) {
+            if (i.second.get_type() == dpp::CHANNEL_TEXT && i.second.name == channel) {
+              g_guild_configs.set_guild_goodbye_channel(event.command.guild_id, i.first);
+              return event.edit_original_response(dpp::message("Effectué"));
+            }
+          }
+          return event.edit_original_response(dpp::message("Channel non trouvé"));
+        });
+    });
+  } else if (*param_str == "goodbye_message") {
+    g_guild_configs.set_guild_goodbye_message(event.command.guild_id,
+                                              *value_str);
   } else {
     return event.reply("paramètre inconnu");
   }
   event.reply("Effectué");
+}
+
+std::string ReplaceAllPercent(std::string str, const std::string &to) {
+  size_t start_pos = 0;
+  while ((start_pos = str.find('%', start_pos)) != std::string::npos) {
+    str.replace(start_pos, 1, to);
+    start_pos +=
+        to.length(); // Handles case where 'to' is a substring of 'from'
+  }
+  return str;
 }
 
 static void send_goodbye(dpp::cluster &bot,
@@ -308,11 +360,12 @@ static void send_goodbye(dpp::cluster &bot,
       bot, event.guild_id,
       [&bot, event](dpp::snowflake guild_id,
                     dpp::snowflake goodbye_channel_id) {
-        std::ostringstream oss;
-        oss << "Bye bye on t'aimait bien " << event.removed.username;
-        auto msg =
-            dpp::message(oss.str()).set_guild_id(guild_id).set_channel_id(
-                goodbye_channel_id);
+        auto s = ReplaceAllPercent(
+            g_guild_configs.get_guild_goodbye_message(guild_id),
+            event.removed.username);
+
+        auto msg = dpp::message(s).set_guild_id(guild_id).set_channel_id(
+            goodbye_channel_id);
         bot.message_create(msg, [&bot, guild_id, event](
                                     const dpp::confirmation_callback_t &ccb) {
           if (!ccb.is_error())
